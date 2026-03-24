@@ -1,8 +1,0 @@
-{
-  "api_url": "https://api.deepseek.com/v1/chat/completions",
-  "api_key": "sk-931f58aff9d4402d8eae4ff0fca72b47",
-  "model_name": "deepseek-chat",
-  "timeout": 120,
-  "concurrency": 4,
-  "source_dir": "D:\\@@MyStudyFiles\\AI\\MyCode\\SQLFileProcess\\JavaFile"
-}
