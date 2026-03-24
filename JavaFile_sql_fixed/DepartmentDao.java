@@ -49,43 +49,43 @@ public class DepartmentDao extends BaseHibernateDao<Department, String> implemen
 		String organization_name =  StringHelper.trimBlanks(condition.getOrganization_name());
 		String type =  StringHelper.trimBlanks(condition.getType());
 
-		StringBuilder sql = new StringBuilder("select * from rs_department where 1=1 and status=1 ");
+		String sql = "select * from rs_department where 1=1 and status=1 ";
 		List<Object> params = new ArrayList<>();
 
 		if(StringHelper.isNotEmpty(id)){
-			sql.append(" and id like ? ");
+			sql+= " and id like ? ";
 			params.add("%" + id + "%");
 		}
 		if(StringHelper.isNotEmpty(department_name)){
-			sql.append(" and department_name like ? ");
+			sql+= " and department_name like ? ";
 			params.add("%" + department_name + "%");
 		}
 		if(StringHelper.isNotEmpty(department_code)){
-			sql.append(" and department_code = ? ");
+			sql+= " and department_code = ? ";
 			params.add(department_code);
 		}
 		if(StringHelper.isNotEmpty(parent_department_name)){
-			sql.append(" and parent_department_name like ? ");
+			sql+= " and parent_department_name like ? ";
 			params.add("%" + parent_department_name + "%");
 		}
 		if(StringHelper.isNotEmpty(parent_department_code)){
-			sql.append(" and parent_department_code = ? ");
+			sql+= " and parent_department_code = ? ";
 			params.add(parent_department_code);
 		}
 		if(StringHelper.isNotEmpty(organization_name)){
-			sql.append(" and organization_name like ? ");
+			sql+= " and organization_name like ? ";
 			params.add("%" + organization_name + "%");
 		}
 		if(StringHelper.isNotEmpty(organization_code)){
-			sql.append(" and organization_code = ? ");
+			sql+= " and organization_code = ? ";
 			params.add(organization_code);
 		}
 		if(StringHelper.isNotEmpty(type)){
-			sql.append(" and type = ? ");
+			sql+= " and type = ? ";
 			params.add(type);
 		}
 		
-		SQLQuery query = getSession().createSQLQuery(sql.toString());
+		SQLQuery query = getSession().createSQLQuery(sql);
 		query.addEntity(Department.class);
 		for (int i = 0; i < params.size(); i++) {
 			query.setParameter(i, params.get(i));
@@ -116,40 +116,40 @@ public class DepartmentDao extends BaseHibernateDao<Department, String> implemen
 		String organization_name =  StringHelper.trimBlanks(condition.getOrganization_name());
 		String type =  StringHelper.trimBlanks(condition.getType());
 
-		StringBuilder sql = new StringBuilder("from rs_department where 1=1 and status=1 ");
+		String sql = "from rs_department where 1=1 and status=1 ";
 		List<Object> params = new ArrayList<>();
 
 		if(StringHelper.isNotEmpty(id)){
-			sql.append(" and id like ? ");
+			sql+= " and id like ? ";
 			params.add("%" + id + "%");
 		}
 		if(StringHelper.isNotEmpty(department_name)){
-			sql.append(" and department_name like ? ");
+			sql+= " and department_name like ? ";
 			params.add("%" + department_name + "%");
 		}
 		if(StringHelper.isNotEmpty(department_code)){
-			sql.append(" and department_code = ? ");
+			sql+= " and department_code = ? ";
 			params.add(department_code);
 		}
 		if(StringHelper.isNotEmpty(parent_department_name)){
-			sql.append(" and parent_department_name like ? ");
+			sql+= " and parent_department_name like ? ";
 			params.add("%" + parent_department_name + "%");
 		}
 		if(StringHelper.isNotEmpty(parent_department_code)){
-			sql.append(" and parent_department_code = ? or department_code = ? ");
+			sql+= " and (parent_department_code = ? or department_code = ?)";
 			params.add(parent_department_code);
 			params.add(parent_department_code);
 		}
 		if(StringHelper.isNotEmpty(organization_name)){
-			sql.append(" and organization_name like ? ");
+			sql+= " and organization_name like ? ";
 			params.add("%" + organization_name + "%");
 		}
 		if(StringHelper.isNotEmpty(organization_code)){
-			sql.append(" and organization_code = ? ");
+			sql+= " and organization_code = ? ";
 			params.add(organization_code);
 		}
 		if(StringHelper.isNotEmpty(type)){
-			sql.append(" and type = ? ");
+			sql+= " and type = ? ";
 			params.add(type);
 		}
 
@@ -158,8 +158,8 @@ public class DepartmentDao extends BaseHibernateDao<Department, String> implemen
 			orderSql=" order by "+page.getSortColumn();
 		}
 
-		String querySql = "select * "+sql.toString()+orderSql +" limit ?, ?";//分页查询
-		String countSql = "select count(*) "+sql.toString();//查询总记录
+		String querySql = "select * "+sql+orderSql +" limit ?, ?";//分页查询
+		String countSql = "select count(*) "+sql;//查询总记录
 		
 		Integer rowCount = jdbcTemplate.queryForObject(countSql, params.toArray(), Integer.class);
 		

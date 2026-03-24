@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import uuid
 
@@ -8,10 +9,15 @@ from config_store import load_config, save_config
 from db import init_db, get_session_stats, get_session_records, get_all_sessions
 from processor import start_processing
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = (os.environ.get('APP_BASE_DIR') or
+            (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+             else os.path.dirname(os.path.abspath(__file__))))
+RESOURCE_DIR = (os.environ.get('APP_RESOURCE_DIR') or
+                (getattr(sys, '_MEIPASS', None) if getattr(sys, 'frozen', False)
+                 else os.path.dirname(os.path.abspath(__file__))))
 DB_PATH = os.path.join(BASE_DIR, 'sql_fix_log.db')
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(RESOURCE_DIR, 'templates'))
 init_db(DB_PATH)
 
 _job = {

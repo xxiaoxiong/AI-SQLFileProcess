@@ -1,7 +1,11 @@
 import json
 import os
+import sys
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+_CONFIG_DIR = (os.environ.get('APP_BASE_DIR') or
+               (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+                else os.path.dirname(os.path.abspath(__file__))))
+CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.json')
 
 DEFAULT_CONFIG = {
     "api_url": "http://10.158.64.11:30888/one-api/v1/chat/completions",
