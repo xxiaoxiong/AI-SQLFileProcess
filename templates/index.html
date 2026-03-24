@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQL 注入自动检测与修复工具</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #4f46e5;
+      --accent-light: #eef2ff;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warn: #d97706;
+    }
+    body { background: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+    .navbar {
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    }
+    .navbar-brand { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; }
+
+    .card { border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .card-header {
+      background: #f1f5f9; border-bottom: 1px solid #e2e8f0;
+      border-radius: 12px 12px 0 0 !important;
+      font-weight: 600; font-size: .92rem; color: #334155;
+    }
+
+    .form-label { font-size: .85rem; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    .form-control, .form-select {
+      font-size: .88rem; border-radius: 8px;
+      border: 1px solid #cbd5e1; background: #fff;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+    }
+    .input-group .btn { border-radius: 0 8px 8px 0; }
+
+    .btn-primary {
+      background: var(--accent); border-color: var(--accent);
+      font-weight: 600; border-radius: 8px;
+    }
+    .btn-primary:hover { background: #4338ca; border-color: #4338ca; }
+    .btn-danger { border-radius: 8px; font-weight: 600; }
+    .btn-outline-secondary { border-radius: 8px; }
+
+    /* Status badges */
+    .stat-card {
+      background: #fff; border-radius: 10px; padding: 14px 18px;
+      border: 1px solid #e2e8f0; text-align: center;
+    }
+    .stat-card .num { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+    .stat-card .lbl { font-size: .75rem; color: #64748b; margin-top: 2px; }
+    .stat-total .num { color: #334155; }
+    .stat-done .num  { color: var(--success); }
+    .stat-fail .num  { color: var(--danger); }
+    .stat-vuln .num  { color: var(--warn); }
+    .stat-run .num   { color: var(--accent); }
+
+    /* Log panel */
+    #log-box {
+      background: #0f172a; color: #94a3b8;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: .78rem; height: 320px; overflow-y: auto;
+      border-radius: 10px; padding: 12px 14px; line-height: 1.6;
+    }
+    #log-box .log-done  { color: #4ade80; }
+    #log-box .log-fail  { color: #f87171; }
+    #log-box .log-scan  { color: #60a5fa; }
+    #log-box .log-retry { color: #fbbf24; }
+    #log-box .log-stop  { color: #f472b6; }
+    #log-box .log-start { color: #a78bfa; }
+
+    /* Progress bar */
+    .progress { height: 8px; border-radius: 99px; background: #e2e8f0; }
+    .progress-bar { border-radius: 99px; transition: width .4s ease; }
+
+    /* Status indicator */
+    .status-dot {
+      display: inline-block; width: 10px; height: 10px;
+      border-radius: 50%; margin-right: 6px;
+    }
+    .status-dot.running { background: #22c55e; animation: blink 1.2s infinite; }
+    .status-dot.idle    { background: #94a3b8; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* Table */
+    .table { font-size: .82rem; }
+    .table th { font-size: .78rem; font-weight: 600; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+    .badge-done   { background: #dcfce7; color: #15803d; }
+    .badge-fail   { background: #fee2e2; color: #b91c1c; }
+    .badge-wait   { background: #f1f5f9; color: #64748b; }
+    .badge-proc   { background: #ede9fe; color: #5b21b6; }
+
+    .session-tag {
+      font-size: .75rem; background: var(--accent-light);
+      color: var(--accent); padding: 2px 8px; border-radius: 99px;
+      font-weight: 600;
+    }
+
+    #path-hint { font-size: .78rem; color: #64748b; margin-top: 4px; }
+    .model-preset-btn { font-size: .78rem; }
+    .section-title { font-size: .8rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark mb-4">
+  <div class="container-fluid px-4">
+    <span class="navbar-brand">
+      <i class="bi bi-shield-check me-2"></i>SQL 注入自动检测与修复工具
+    </span>
+    <span id="status-badge" class="text-white-50 small">
+      <span class="status-dot idle" id="status-dot"></span>
+      <span id="status-text">空闲</span>
+    </span>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+  <div class="row g-3">
+
+    <!-- LEFT: Config Panel -->
+    <div class="col-xl-4 col-lg-5">
+
+      <!-- Source Directory -->
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-folder2-open me-1"></i>扫描目录</div>
+        <div class="card-body pb-3">
+          <label class="form-label">源文件夹路径</label>
+          <div class="input-group">
+            <input type="text" class="form-control" id="source_dir"
+                   placeholder="例：D:\workspace\my_project\src"
+                   value="{{ config.source_dir or '' }}">
+            <button class="btn btn-outline-secondary" onclick="pickDir()" title="粘贴路径后点击验证">
+              <i class="bi bi-check2"></i>
+            </button>
+          </div>
+          <div id="path-hint"></div>
+        </div>
+      </div>
+
+      <!-- Model Config -->
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-cpu me-1"></i>模型配置</div>
+        <div class="card-body">
+          <div class="section-title">局域网模型</div>
+          <div class="d-flex flex-wrap gap-2 mb-2">
+            <button class="btn btn-outline-secondary btn-sm model-preset-btn"
+              onclick="setPreset('http://10.158.64.11:30888/one-api/v1/chat/completions','sk-KbMJu2lFFUt3Nkgz66A501C2764e474595F40e615eCd4b4e','gen-studio-DeepSeek-R1-0528-AaTW')">
+              <i class="bi bi-hdd-network me-1"></i>DeepSeek-R1
+            </button>
+            <button class="btn btn-outline-secondary btn-sm model-preset-btn"
+              onclick="setPreset('http://10.158.64.11:30888/one-api/v1/chat/completions','sk-KbMJu2lFFUt3Nkgz66A501C2764e474595F40e615eCd4b4e','gen-studio-Qwen3-235B-xxx')">
+              <i class="bi bi-hdd-network me-1"></i>Qwen3-235B
+            </button>
+          </div>
+          <div class="section-title mt-2">线上模型</div>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button class="btn btn-outline-primary btn-sm model-preset-btn"
+              onclick="setPreset('https://api.deepseek.com/v1/chat/completions','sk-931f58aff9d4402d8eae4ff0fca72b47','deepseek-chat')">
+              <i class="bi bi-cloud me-1"></i>DeepSeek Chat
+            </button>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">API 地址</label>
+            <input type="text" class="form-control" id="api_url"
+                   value="{{ config.api_url }}"
+                   placeholder="http://局域网IP:端口/v1/chat/completions">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">API Key</label>
+            <input type="password" class="form-control" id="api_key"
+                   value="{{ config.api_key }}"
+                   placeholder="Bearer Token / SK Key">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">模型名称</label>
+            <input type="text" class="form-control" id="model_name"
+                   value="{{ config.model_name }}"
+                   placeholder="gen-studio-DeepSeek-R1-0528-AaTW">
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">超时时间 (秒)</label>
+              <input type="number" class="form-control" id="timeout"
+                     value="{{ config.timeout }}" min="10" max="600">
+            </div>
+            <div class="col-6">
+              <label class="form-label">并发数</label>
+              <input type="number" class="form-control" id="concurrency"
+                     value="{{ config.concurrency }}" min="1" max="32">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="d-flex gap-2 mb-3">
+        <button class="btn btn-primary flex-grow-1" id="btn-start" onclick="startJob()">
+          <i class="bi bi-play-circle me-1"></i>开始处理
+        </button>
+        <button class="btn btn-danger" id="btn-stop" onclick="stopJob()" disabled>
+          <i class="bi bi-stop-circle me-1"></i>停止
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div class="card mb-3" id="progress-card" style="display:none!important">
+        <div class="card-body py-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="small text-muted">处理进度</span>
+            <span class="small fw-bold" id="progress-text">0 / 0</span>
+          </div>
+          <div class="progress">
+            <div class="progress-bar bg-primary" id="progress-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="row g-2" id="stats-row" style="display:none">
+        <div class="col-6"><div class="stat-card stat-total"><div class="num" id="s-total">0</div><div class="lbl">总文件数</div></div></div>
+        <div class="col-6"><div class="stat-card stat-done"><div class="num" id="s-done">0</div><div class="lbl">已完成</div></div></div>
+        <div class="col-6"><div class="stat-card stat-fail"><div class="num" id="s-fail">0</div><div class="lbl">失败</div></div></div>
+        <div class="col-6"><div class="stat-card stat-vuln"><div class="num" id="s-vuln">0</div><div class="lbl">修复漏洞数</div></div></div>
+      </div>
+
+    </div><!-- /LEFT -->
+
+    <!-- RIGHT: Log + Table -->
+    <div class="col-xl-8 col-lg-7">
+
+      <!-- Log -->
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-terminal me-1"></i>实时日志</span>
+          <div class="d-flex gap-2 align-items-center">
+            <span class="session-tag" id="session-tag" style="display:none"></span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearLog()">
+              <i class="bi bi-trash3"></i>
+            </button>
+            <div class="form-check form-switch mb-0 ms-1">
+              <input class="form-check-input" type="checkbox" id="auto-scroll" checked>
+              <label class="form-check-label small" for="auto-scroll">自动滚动</label>
+            </div>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div id="log-box"></div>
+        </div>
+      </div>
+
+      <!-- Records Table -->
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-table me-1"></i>处理记录</span>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadRecords()">
+              <i class="bi bi-arrow-clockwise"></i> 刷新
+            </button>
+            <select class="form-select form-select-sm" id="session-select" onchange="onSessionChange()" style="max-width:160px">
+              <option value="">当前会话</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+            <table class="table table-hover mb-0">
+              <thead class="sticky-top bg-white">
+                <tr>
+                  <th>#</th>
+                  <th>源文件</th>
+                  <th>状态</th>
+                  <th>修复处</th>
+                  <th>耗时</th>
+                  <th>更新时间</th>
+                  <th>错误信息</th>
+                </tr>
+              </thead>
+              <tbody id="records-tbody">
+                <tr><td colspan="7" class="text-center text-muted py-4 small">暂无记录</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /RIGHT -->
+  </div><!-- /row -->
+</div><!-- /container -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let pollTimer = null;
+let isRunning = false;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getConfig() {
+  return {
+    source_dir: document.getElementById('source_dir').value.trim(),
+    api_url:    document.getElementById('api_url').value.trim(),
+    api_key:    document.getElementById('api_key').value.trim(),
+    model_name: document.getElementById('model_name').value.trim(),
+    timeout:    parseInt(document.getElementById('timeout').value) || 120,
+    concurrency:parseInt(document.getElementById('concurrency').value) || 4
+  };
+}
+
+function setPreset(url, key, model) {
+  document.getElementById('api_url').value   = url;
+  document.getElementById('api_key').value   = key;
+  document.getElementById('model_name').value = model;
+}
+
+function pickDir() {
+  const val = document.getElementById('source_dir').value.trim();
+  const hint = document.getElementById('path-hint');
+  if (!val) { hint.textContent = ''; return; }
+  hint.innerHTML = `<i class="bi bi-check-circle text-success"></i> 路径已填写：${val}`;
+}
+
+function clearLog() {
+  document.getElementById('log-box').innerHTML = '';
+}
+
+// ─── Log rendering ───────────────────────────────────────────────────────────
+
+const logClassMap = [
+  [/^\[完成\]/, 'log-done'],
+  [/^\[失败\]/, 'log-fail'],
+  [/^\[扫描\]/, 'log-scan'],
+  [/^\[输出\]/, 'log-scan'],
+  [/^\[启动\]/, 'log-start'],
+  [/^\[重试/, 'log-retry'],
+  [/^\[停止\]/, 'log-stop'],
+  [/^\[错误\]/, 'log-fail'],
+];
+
+function appendLog(lines) {
+  const box = document.getElementById('log-box');
+  lines.forEach(line => {
+    const span = document.createElement('div');
+    let cls = '';
+    for (const [re, c] of logClassMap) { if (re.test(line)) { cls = c; break; } }
+    if (cls) span.className = cls;
+    span.textContent = line;
+    box.appendChild(span);
+  });
+  if (document.getElementById('auto-scroll').checked) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+let lastLogLen = 0;
+function syncLogs(logs) {
+  if (logs.length > lastLogLen) {
+    appendLog(logs.slice(lastLogLen));
+    lastLogLen = logs.length;
+  }
+}
+
+// ─── Stats / Progress ────────────────────────────────────────────────────────
+
+function updateStats(stats) {
+  if (!stats || !stats.total) return;
+  document.getElementById('stats-row').style.display = '';
+  document.getElementById('progress-card').style.display = '';
+  document.getElementById('s-total').textContent = stats.total || 0;
+  document.getElementById('s-done').textContent  = stats.completed || 0;
+  document.getElementById('s-fail').textContent  = stats.failed || 0;
+  document.getElementById('s-vuln').textContent  = stats.total_vulns || 0;
+
+  const done = (stats.completed || 0) + (stats.failed || 0);
+  const total = stats.total || 1;
+  const pct = Math.round(done / total * 100);
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = `${done} / ${total}`;
+}
+
+// ─── Status polling ──────────────────────────────────────────────────────────
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+
+    isRunning = data.running;
+    setRunningUI(isRunning);
+    syncLogs(data.logs || []);
+    updateStats(data.stats || {});
+
+    if (data.session_id) {
+      const tag = document.getElementById('session-tag');
+      tag.textContent = 'Session: ' + data.session_id;
+      tag.style.display = '';
+    }
+
+    if (!isRunning) {
+      stopPolling();
+      loadRecords();
+      loadSessions();
+    }
+  } catch(e) { /* silent */ }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  lastLogLen = 0;
+  pollTimer = setInterval(pollStatus, 1500);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function setRunningUI(running) {
+  const dot  = document.getElementById('status-dot');
+  const txt  = document.getElementById('status-text');
+  const btnS = document.getElementById('btn-start');
+  const btnX = document.getElementById('btn-stop');
+
+  if (running) {
+    dot.className = 'status-dot running';
+    txt.textContent = '处理中…';
+    btnS.disabled = true;
+    btnX.disabled = false;
+  } else {
+    dot.className = 'status-dot idle';
+    txt.textContent = '空闲';
+    btnS.disabled = false;
+    btnX.disabled = true;
+  }
+}
+
+// ─── Job Control ─────────────────────────────────────────────────────────────
+
+async function startJob() {
+  const cfg = getConfig();
+  if (!cfg.source_dir) { alert('请填写源文件夹路径'); return; }
+  if (!cfg.api_url)    { alert('请填写 API 地址'); return; }
+  if (!cfg.api_key)    { alert('请填写 API Key'); return; }
+  if (!cfg.model_name) { alert('请填写模型名称'); return; }
+
+  clearLog();
+  lastLogLen = 0;
+  document.getElementById('stats-row').style.display = 'none';
+  document.getElementById('progress-card').style.display = 'none';
+
+  const r = await fetch('/api/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  });
+  const data = await r.json();
+  if (!r.ok) { alert('启动失败: ' + (data.error || r.status)); return; }
+
+  setRunningUI(true);
+  startPolling();
+}
+
+async function stopJob() {
+  await fetch('/api/stop', { method: 'POST' });
+}
+
+// ─── Records Table ───────────────────────────────────────────────────────────
+
+const statusBadge = {
+  '已完成': '<span class="badge badge-done">已完成</span>',
+  '处理失败': '<span class="badge badge-fail">处理失败</span>',
+  '待处理': '<span class="badge badge-wait">待处理</span>',
+  '处理中': '<span class="badge badge-proc">处理中</span>',
+};
+
+async function loadRecords() {
+  const sel = document.getElementById('session-select');
+  const sid = sel.value || '';
+  const url = '/api/records' + (sid ? '?session_id=' + sid : '');
+  const r = await fetch(url);
+  const records = await r.json();
+  const tbody = document.getElementById('records-tbody');
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4 small">暂无记录</td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(rec => {
+    const fname = rec.source_file.replace(/\\/g, '/').split('/').pop();
+    const fpath = rec.source_file.replace(/\\/g, '/').split('/').slice(-3).join('/');
+    const badge = statusBadge[rec.process_status] || rec.process_status;
+    const err   = rec.error_msg ? `<span class="text-danger" title="${escHtml(rec.error_msg)}">` +
+                  escHtml(rec.error_msg.slice(0, 40)) + (rec.error_msg.length > 40 ? '…' : '') + '</span>' : '-';
+    return `<tr>
+      <td class="text-muted">${rec.id}</td>
+      <td title="${escHtml(rec.source_file)}"><span class="fw-semibold">${escHtml(fname)}</span>
+          <br><small class="text-muted">${escHtml(fpath)}</small></td>
+      <td>${badge}</td>
+      <td class="text-center">${rec.vuln_count || 0}</td>
+      <td class="text-center">${rec.process_time ? rec.process_time.toFixed(1)+'s' : '-'}</td>
+      <td class="text-muted small">${(rec.update_time||'').slice(11,19)}</td>
+      <td>${err}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadSessions() {
+  const r = await fetch('/api/sessions');
+  const sessions = await r.json();
+  const sel = document.getElementById('session-select');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">当前会话</option>';
+  sessions.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.session_id;
+    opt.textContent = `${s.session_id} (${s.start_time.slice(5,16)}, ${s.total}文件)`;
+    sel.appendChild(opt);
+  });
+  if (cur) sel.value = cur;
+}
+
+function onSessionChange() {
+  loadRecords();
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+
+(async () => {
+  await loadSessions();
+  const r = await fetch('/api/status');
+  const data = await r.json();
+  if (data.running) {
+    setRunningUI(true);
+    startPolling();
+  }
+  if (data.session_id) {
+    loadRecords();
+    const tag = document.getElementById('session-tag');
+    tag.textContent = 'Session: ' + data.session_id;
+    tag.style.display = '';
+  }
+  updateStats(data.stats || {});
+  if ((data.logs||[]).length) {
+    appendLog(data.logs);
+    lastLogLen = data.logs.length;
+  }
+})();
+</script>
+</body>
+</html>
