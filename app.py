@@ -5,7 +5,8 @@ import uuid
 from flask import Flask, render_template, request, jsonify
 
 from config_store import load_config, save_config
-from db import init_db, get_session_stats, get_session_records, get_all_sessions
+from db import (init_db, get_session_stats, get_session_records, get_all_sessions,
+               delete_session_records, delete_all_records)
 from processor import start_processing
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +117,28 @@ def api_records():
 @app.route('/api/sessions', methods=['GET'])
 def api_sessions():
     return jsonify(get_all_sessions(DB_PATH))
+
+
+@app.route('/api/clear-logs', methods=['POST'])
+def api_clear_logs():
+    """Clear server-side in-memory logs so polling won't bring them back."""
+    with _job['lock']:
+        _job['logs'] = []
+    return jsonify({'ok': True})
+
+
+@app.route('/api/records/delete', methods=['POST'])
+def api_delete_records():
+    """Delete processing records. Pass session_id to delete one session, or 'all' to wipe everything."""
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id', '').strip()
+    if session_id == 'all':
+        delete_all_records(DB_PATH)
+    elif session_id:
+        delete_session_records(DB_PATH, session_id)
+    else:
+        return jsonify({'error': '请指定 session_id 或 "all"'}), 400
+    return jsonify({'ok': True})
 
 
 if __name__ == '__main__':

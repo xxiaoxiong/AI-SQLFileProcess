@@ -17,7 +17,16 @@ _lock = threading.Lock()
 
 def _log(log_callback, msg):
     with _lock:
-        log_callback(msg)
+        ts = time.strftime('%H:%M:%S')
+        log_callback(f"[{ts}] {msg}")
+
+
+def _fmt_size(size_bytes):
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    return f"{size_bytes / (1024*1024):.1f}MB"
 
 
 def verify_code(original, fixed):
@@ -41,8 +50,9 @@ def count_changes(original, fixed):
 
 
 def process_single_file(file_info, source_dir, target_dir, config, db_path,
-                        session_id, stop_event, log_callback):
+                        session_id, stop_event, log_callback, file_idx, file_total):
     abs_path, rel_path = file_info
+    tag = f"[{file_idx}/{file_total}]"
 
     if stop_event.is_set():
         return
@@ -53,10 +63,15 @@ def process_single_file(file_info, source_dir, target_dir, config, db_path,
 
     try:
         update_file_processing(db_path, record_id)
-        _log(log_callback, f"[处理中] {rel_path}")
+
+        file_size = os.path.getsize(abs_path)
+        _log(log_callback, f"{tag} 开始处理: {rel_path} ({_fmt_size(file_size)})")
 
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             original_code = f.read()
+
+        line_count = original_code.count('\n') + 1
+        _log(log_callback, f"{tag} 读取完成: {line_count} 行, 准备调用模型...")
 
         fixed_code = None
         last_error = None
@@ -65,13 +80,19 @@ def process_single_file(file_info, source_dir, target_dir, config, db_path,
                 update_file_failed(db_path, record_id, "任务已停止")
                 return
             try:
+                model_start = time.time()
+                _log(log_callback, f"{tag} 模型调用中... {rel_path}" +
+                     (f" (第{attempt+1}次重试)" if attempt > 0 else ""))
                 fixed_code = call_model(original_code, config)
+                model_elapsed = time.time() - model_start
+                _log(log_callback, f"{tag} 模型响应完成: {rel_path} | 模型耗时: {model_elapsed:.1f}s | 返回{len(fixed_code)}字符")
                 break
             except Exception as e:
                 last_error = str(e)
                 if attempt < 2:
-                    _log(log_callback, f"[重试 {attempt + 1}/2] {rel_path}: {last_error}")
-                    time.sleep(3)
+                    wait_sec = 3 * (attempt + 1)
+                    _log(log_callback, f"{tag} [重试 {attempt+1}/2] {rel_path}: {last_error}，{wait_sec}s后重试")
+                    time.sleep(wait_sec)
 
         if fixed_code is None:
             raise Exception(f"模型调用失败（已重试2次）: {last_error}")
@@ -86,25 +107,31 @@ def process_single_file(file_info, source_dir, target_dir, config, db_path,
         vuln_count = count_changes(original_code, fixed_code)
         elapsed = time.time() - start_time
         update_file_completed(db_path, record_id, vuln_count, elapsed)
-        _log(log_callback, f"[完成] {rel_path} | 修复处数: {vuln_count} | 耗时: {elapsed:.1f}s")
+        _log(log_callback, f"{tag} [完成] {rel_path} | 修复处数: {vuln_count} | 总耗时: {elapsed:.1f}s")
 
     except Exception as e:
         elapsed = time.time() - start_time
         update_file_failed(db_path, record_id, str(e))
-        _log(log_callback, f"[失败] {rel_path}: {e}")
+        _log(log_callback, f"{tag} [失败] {rel_path}: {e}")
 
 
 def start_processing(source_dir, session_id, config, db_path,
                      stop_event, log_callback, on_finish):
     try:
         _log(log_callback, f"[扫描] 开始扫描目录: {source_dir}")
-        files = scan_java_files(source_dir)
+        files = scan_java_files(source_dir, log_callback=log_callback)
 
         if not files:
             _log(log_callback, "[扫描] 未找到任何 .java 文件，任务结束")
             return
 
-        _log(log_callback, f"[扫描] 共找到 {len(files)} 个 Java 文件")
+        total_size = 0
+        for abs_p, _ in files:
+            try:
+                total_size += os.path.getsize(abs_p)
+            except OSError:
+                pass
+        _log(log_callback, f"[扫描] 共找到 {len(files)} 个 Java 文件，总大小: {_fmt_size(total_size)}")
 
         source_dir_abs = os.path.abspath(source_dir)
         source_name = os.path.basename(source_dir_abs.rstrip('/\\').rstrip('\\'))
@@ -114,16 +141,18 @@ def start_processing(source_dir, session_id, config, db_path,
         _log(log_callback, f"[输出] 修复目录: {target_dir}")
 
         max_workers = max(1, int(config.get('concurrency', 4)))
-        _log(log_callback, f"[启动] 并发进程数: {max_workers}")
+        _log(log_callback, f"[启动] 并发线程数: {max_workers}，模型: {config.get('model_name', 'N/A')}")
 
+        file_total = len(files)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(
                     process_single_file,
                     fi, source_dir_abs, target_dir, config,
-                    db_path, session_id, stop_event, log_callback
+                    db_path, session_id, stop_event, log_callback,
+                    idx + 1, file_total
                 ): fi[1]
-                for fi in files
+                for idx, fi in enumerate(files)
             }
             for future in concurrent.futures.as_completed(futures):
                 rel = futures[future]

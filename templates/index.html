@@ -73,6 +73,8 @@
     #log-box .log-retry { color: #fbbf24; }
     #log-box .log-stop  { color: #f472b6; }
     #log-box .log-start { color: #a78bfa; }
+    #log-box .log-model { color: #38bdf8; }
+    #log-box .log-warn  { color: #fbbf24; }
 
     /* Progress bar */
     .progress { height: 8px; border-radius: 99px; background: #e2e8f0; }
@@ -263,6 +265,9 @@
             <button class="btn btn-outline-secondary btn-sm" onclick="loadRecords()">
               <i class="bi bi-arrow-clockwise"></i> 刷新
             </button>
+            <button class="btn btn-outline-danger btn-sm" onclick="deleteRecords()">
+              <i class="bi bi-trash3"></i> 清除记录
+            </button>
             <select class="form-select form-select-sm" id="session-select" onchange="onSessionChange()" style="max-width:160px">
               <option value="">当前会话</option>
             </select>
@@ -325,21 +330,28 @@ function pickDir() {
   hint.innerHTML = `<i class="bi bi-check-circle text-success"></i> 路径已填写：${val}`;
 }
 
-function clearLog() {
+async function clearLog() {
   document.getElementById('log-box').innerHTML = '';
+  lastLogLen = 0;
+  try { await fetch('/api/clear-logs', { method: 'POST' }); } catch(e) {}
 }
 
 // ─── Log rendering ───────────────────────────────────────────────────────────
 
 const logClassMap = [
-  [/^\[完成\]/, 'log-done'],
-  [/^\[失败\]/, 'log-fail'],
-  [/^\[扫描\]/, 'log-scan'],
-  [/^\[输出\]/, 'log-scan'],
-  [/^\[启动\]/, 'log-start'],
-  [/^\[重试/, 'log-retry'],
-  [/^\[停止\]/, 'log-stop'],
-  [/^\[错误\]/, 'log-fail'],
+  [/\[完成\]/, 'log-done'],
+  [/\[失败\]/, 'log-fail'],
+  [/\[扫描\]/, 'log-scan'],
+  [/\[输出\]/, 'log-scan'],
+  [/\[启动\]/, 'log-start'],
+  [/\[重试/, 'log-retry'],
+  [/\[停止\]/, 'log-stop'],
+  [/\[错误\]/, 'log-fail'],
+  [/模型调用中/, 'log-model'],
+  [/模型响应完成/, 'log-done'],
+  [/读取完成/, 'log-scan'],
+  [/开始处理:/, 'log-start'],
+  [/扫描警告/, 'log-warn'],
 ];
 
 function appendLog(lines) {
@@ -359,6 +371,11 @@ function appendLog(lines) {
 
 let lastLogLen = 0;
 function syncLogs(logs) {
+  // If server logs were cleared, reset our pointer
+  if (logs.length < lastLogLen) {
+    lastLogLen = 0;
+    document.getElementById('log-box').innerHTML = '';
+  }
   if (logs.length > lastLogLen) {
     appendLog(logs.slice(lastLogLen));
     lastLogLen = logs.length;
@@ -412,7 +429,7 @@ async function pollStatus() {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   lastLogLen = 0;
-  pollTimer = setInterval(pollStatus, 1500);
+  pollTimer = setInterval(pollStatus, 800);
 }
 
 function stopPolling() {
@@ -528,6 +545,22 @@ async function loadSessions() {
 
 function onSessionChange() {
   loadRecords();
+}
+
+async function deleteRecords() {
+  const sel = document.getElementById('session-select');
+  const sid = sel.value || 'all';
+  const label = sid === 'all' ? '所有会话的处理记录' : `会话 ${sid} 的记录`;
+  if (!confirm(`确认删除${label}？此操作不可恢复。`)) return;
+  try {
+    await fetch('/api/records/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ session_id: sid })
+    });
+    loadRecords();
+    loadSessions();
+  } catch(e) { alert('删除失败: ' + e); }
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────

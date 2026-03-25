@@ -56,24 +56,59 @@ def call_model(code, config):
 
     data = resp.json()
     content = data['choices'][0]['message']['content']
-    return extract_code(content)
+    fixed = extract_code(content)
+
+    if not is_pure_java_code(fixed):
+        raise ValueError("模型返回包含非代码说明文字，已拒绝本次输出")
+
+    return fixed
 
 
 def extract_code(text):
-    """Strip markdown code fences from model response."""
+    """Extract Java code from model response and strip markdown wrappers."""
     text = text.strip()
 
     # Handle <think>...</think> reasoning blocks (DeepSeek-R1 style)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
-    # Match ```java ... ``` or ``` ... ```
-    match = re.search(r'```(?:java)?\s*\n(.*?)```', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    # Prefer fenced code blocks if present
+    fenced_blocks = re.findall(r'```(?:java)?\s*\n?(.*?)```', text, flags=re.DOTALL)
+    if fenced_blocks:
+        for block in fenced_blocks:
+            block = block.strip()
+            if is_pure_java_code(block):
+                return block
+        return fenced_blocks[0].strip()
 
-    # Match ``` at start of line
-    match = re.search(r'```(?:java)?(.*?)```', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    # No fence: cut possible prose before Java start
+    start = re.search(r'(?m)^\s*(package\s+[\w\.]+\s*;|import\s+[\w\.\*]+\s*;|(public\s+)?(class|interface|enum)\s+\w+)', text)
+    if start:
+        return text[start.start():].strip()
 
     return text
+
+
+def is_pure_java_code(text):
+    """Reject obvious markdown/explanation and keep only Java-looking output."""
+    if not text:
+        return False
+
+    stripped = text.strip()
+
+    # Markdown fences should not exist after extraction
+    if '```' in stripped:
+        return False
+
+    # Must look like a Java source file
+    has_java_structure = bool(re.search(r'(?m)^\s*(package\s+[\w\.]+\s*;|import\s+[\w\.\*]+\s*;|(public\s+)?(class|interface|enum)\s+\w+)', stripped))
+    if not has_java_structure:
+        return False
+
+    # Common explanation markers at beginning
+    head = '\n'.join([ln.strip() for ln in stripped.splitlines()[:12] if ln.strip()])
+    bad_markers = (
+        '以下是', '说明', '解释', '修改点', '总结',
+        'Here is', 'Explanation', 'Summary',
+        '#', '- ', '* '
+    )
+    return not any(marker in head for marker in bad_markers)
